@@ -1,0 +1,72 @@
+name: Render canh kiem 3D
+
+# Chi chay bang tay tu tab Actions tren web GitHub
+on:
+  workflow_dispatch:
+
+jobs:
+  render:
+    name: Render 480 frames + ghep MP4
+    runs-on: ubuntu-latest
+    # Gioi han cung cua GitHub la 360 phut/job - de 350 cho chac
+    timeout-minutes: 350
+    steps:
+      - name: Lay code
+        uses: actions/checkout@v4
+
+      - name: Cai ffmpeg + thu vien he thong (+ Blender apt lam phuong an du phong)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg blender curl xz-utils \
+            libgl1 libegl1 libxi6 libxrender1 libxkbcommon0 libsm6
+
+      - name: Tai Blender 4.2.9 chinh thuc (dung ban da kiem thu o may local)
+        run: |
+          cd "$HOME"
+          OK=0
+          if curl -fL -o blender.tar.xz \
+              https://download.blender.org/release/Blender4.2/blender-4.2.9-linux-x64.tar.xz \
+              && tar -xf blender.tar.xz \
+              && [ -x "$HOME/blender-4.2.9-linux-x64/blender" ]; then
+            OK=1
+          fi
+          if [ "$OK" = "1" ]; then
+            echo "BLENDER_BIN=$HOME/blender-4.2.9-linux-x64/blender" >> "$GITHUB_ENV"
+          else
+            echo "Tai tarball that bai - dung Blender cai qua apt lam du phong"
+            echo "BLENDER_BIN=$(command -v blender)" >> "$GITHUB_ENV"
+          fi
+
+      - name: Kiem tra Blender
+        run: |
+          echo "Dung Blender tai: $BLENDER_BIN"
+          "$BLENDER_BIN" --version
+
+      - name: Render frames (Cycles CPU, 640x360, 480 frames)
+        run: |
+          START=$(date +%s)
+          "$BLENDER_BIN" -b --python scene.py -- frames
+          END=$(date +%s)
+          echo "RENDER_SECONDS=$((END - START))" >> "$GITHUB_ENV"
+          echo "Thoi gian render: $((END - START)) giay"
+
+      - name: Dem frames da render
+        run: |
+          COUNT=$(ls frames/*.png | wc -l)
+          echo "So frames: $COUNT / 480"
+          ls frames | head -3
+          ls frames | tail -3
+
+      - name: Ghep MP4 (H.264, 24 fps)
+        run: |
+          ffmpeg -y -framerate 24 -start_number 1 -i frames/f%04d.png \
+            -c:v libx264 -pix_fmt yuv420p -crf 18 -movflags +faststart \
+            video-kiem-3d.mp4
+          ls -lh video-kiem-3d.mp4
+
+      - name: Tai video len artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-kiem-3d
+          path: video-kiem-3d.mp4
+          if-no-files-found: error
